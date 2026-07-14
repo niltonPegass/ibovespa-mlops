@@ -29,7 +29,7 @@ TICKER = "^BVSP"
 RAW_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "raw" / "ibovespa_raw.parquet"
 
 MAX_TENTATIVAS = 3
-ESPERA_INICIAL_SEGUNDOS = 45
+ESPERA_INICIAL_SEGUNDOS = 10
 
 
 def _tentar_download(period_years: int) -> pd.DataFrame:
