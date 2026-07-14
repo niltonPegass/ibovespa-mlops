@@ -1,8 +1,9 @@
 """
 src/train.py
 
-Treina e compara 3 abordagens para prever o retorno diário do Ibovespa:
-1. Baseline: média histórica do retorno (calculada só com o treino)
+Treina e compara 3 abordagens para prever a VOLATILIDADE (retorno absoluto)
+do Ibovespa no próximo dia útil:
+1. Baseline: volatilidade média histórica (calculada só com o treino)
 2. Random Forest
 3. XGBoost
 
@@ -29,11 +30,12 @@ MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 
 FEATURE_COLUMNS = [
     "return_lag_1", "return_lag_2", "return_lag_5",
+    "abs_return_lag_1", "abs_return_lag_2",
     "volatility_5d", "volatility_10d", "volatility_21d",
     "momentum_5d", "momentum_10d",
     "hl_range_lag_1",
 ]
-TARGET_COLUMN = "target"
+TARGET_COLUMN = "target_volatility"
 
 TEST_SIZE_FRACTION = 0.2
 
@@ -66,8 +68,8 @@ def quick_evaluate(y_true, y_pred, name: str) -> None:
 
 def train_baseline(train_df: pd.DataFrame) -> float:
     """
-    Baseline ingênuo: prever sempre a média histórica do retorno,
-    calculada SOMENTE com dados de treino (nunca com teste).
+    Baseline ingênuo: prever sempre a volatilidade média histórica
+    (retorno absoluto médio), calculada SOMENTE com dados de treino.
     """
     media_treino = train_df[TARGET_COLUMN].mean()
     return media_treino

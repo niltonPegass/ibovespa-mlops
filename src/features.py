@@ -1,15 +1,23 @@
 """
 src/features.py
 
-Constrói o conjunto de features para prever o retorno diário do Ibovespa
-do PRÓXIMO dia útil, a partir do dado bruto (raw).
+Constrói o conjunto de features para prever a VOLATILIDADE do Ibovespa
+no PRÓXIMO dia útil, a partir do dado bruto (raw).
+
+Por que volatilidade e não o retorno em si?
+A EDA (Fase 3) e um primeiro teste de modelagem (Fase 5) mostraram que o
+retorno diário do Ibovespa tem sinal muito fraco (mercado eficiente:
+autocorrelação quase nula). Porém, a própria EDA revelou "clusters de
+volatilidade" - dias turbulentos tendem a ser seguidos por outros dias
+turbulentos. Esse padrão É previsível e bem documentado na literatura
+financeira (é o que motiva toda a família de modelos GARCH). Por isso,
+pivotamos o alvo para prever o TAMANHO do movimento de amanhã
+(|retorno_{t+1}|), em vez da sua direção.
 
 Regra de ouro deste arquivo (para evitar data leakage):
 Toda feature na linha do dia `t` deve usar apenas informação disponível
-ATÉ o dia `t` (inclusive). O alvo (target) é o retorno do dia `t+1`,
+ATÉ o dia `t` (inclusive). O alvo é o retorno absoluto do dia `t+1`,
 deslocado para trás (shift(-1)) para ficar alinhado com as features de `t`.
-Isso simula fielmente a situação real: no fim do dia `t`, com os dados
-que temos até ali, queremos prever o retorno de amanhã.
 """
 
 from pathlib import Path
@@ -27,26 +35,30 @@ def load_raw_data() -> pd.DataFrame:
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Recebe o DataFrame bruto (Open, High, Low, Close, Volume) e retorna
-    um DataFrame de features + coluna 'target', pronto para treino.
+    um DataFrame de features + coluna 'target_volatility', pronto para treino.
     """
     out = pd.DataFrame(index=df.index)
 
-    # Retorno diário - base de tudo. shift(1) em relação a ele = passado.
     daily_return = df["Close"].pct_change()
+    abs_return = daily_return.abs()
 
-    # --- Lags de retorno: "qual foi o retorno N dias atrás?" ---
+    # --- Lags de retorno (mantidos - ainda podem carregar algum sinal de direção) ---
     out["return_lag_1"] = daily_return.shift(1)
     out["return_lag_2"] = daily_return.shift(2)
     out["return_lag_5"] = daily_return.shift(5)
 
+    # --- Lags de retorno ABSOLUTO: o ingrediente central pra prever volatilidade ---
+    # Se ontem foi um dia de movimento forte (positivo ou negativo), isso é
+    # um bom preditor de que amanhã também pode ser volátil.
+    out["abs_return_lag_1"] = abs_return.shift(1)
+    out["abs_return_lag_2"] = abs_return.shift(2)
+
     # --- Volatilidade recente (desvio padrão móvel do retorno) ---
-    # .shift(1) aqui garante que a janela de cálculo termina ONTEM,
-    # nunca inclui o retorno de hoje (que ainda não existe no momento da previsão).
     out["volatility_5d"] = daily_return.shift(1).rolling(window=5).std()
     out["volatility_10d"] = daily_return.shift(1).rolling(window=10).std()
     out["volatility_21d"] = daily_return.shift(1).rolling(window=21).std()
 
-    # --- Momentum (média móvel do retorno) ---
+    # --- Momentum (média móvel do retorno) - mantido, útil de forma secundária ---
     out["momentum_5d"] = daily_return.shift(1).rolling(window=5).mean()
     out["momentum_10d"] = daily_return.shift(1).rolling(window=10).mean()
 
@@ -54,12 +66,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hl_range = (df["High"] - df["Low"]) / df["Close"]
     out["hl_range_lag_1"] = hl_range.shift(1)
 
-    # --- Alvo: retorno de AMANHÃ (t+1), alinhado com as features de hoje (t) ---
-    out["target"] = daily_return.shift(-1)
+    # --- Alvo: retorno ABSOLUTO de amanhã (t+1), alinhado com as features de hoje (t) ---
+    out["target_volatility"] = abs_return.shift(-1)
 
-    # Linhas iniciais (janelas incompletas) e a última linha (target inexistente,
-    # pois não sabemos o retorno do dia seguinte ao último dado disponível)
-    # viram NaN. Removemos.
     out = out.dropna()
 
     return out
