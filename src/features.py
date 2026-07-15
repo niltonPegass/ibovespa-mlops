@@ -32,10 +32,16 @@ def load_raw_data() -> pd.DataFrame:
     return pd.read_parquet(RAW_DATA_PATH)
 
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
+def compute_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Recebe o DataFrame bruto (Open, High, Low, Close, Volume) e retorna
-    um DataFrame de features + coluna 'target_volatility', pronto para treino.
+    Calcula APENAS as colunas de features (sem o alvo) a partir do dado bruto.
+
+    Isolar essa lógica permite reutilizá-la tanto no treino (build_features,
+    abaixo) quanto na API de serving (Fase 8) - garantindo que a API calcula
+    as features EXATAMENTE da mesma forma que o treino. Se essa lógica fosse
+    duplicada em dois lugares, um ajuste feito só de um lado criaria uma
+    divergência silenciosa entre o que o modelo aprendeu e o que ele recebe
+    em produção (training/serving skew).
     """
     out = pd.DataFrame(index=df.index)
 
@@ -48,8 +54,6 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     out["return_lag_5"] = daily_return.shift(5)
 
     # --- Lags de retorno ABSOLUTO: o ingrediente central pra prever volatilidade ---
-    # Se ontem foi um dia de movimento forte (positivo ou negativo), isso é
-    # um bom preditor de que amanhã também pode ser volátil.
     out["abs_return_lag_1"] = abs_return.shift(1)
     out["abs_return_lag_2"] = abs_return.shift(2)
 
@@ -58,7 +62,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     out["volatility_10d"] = daily_return.shift(1).rolling(window=10).std()
     out["volatility_21d"] = daily_return.shift(1).rolling(window=21).std()
 
-    # --- Momentum (média móvel do retorno) - mantido, útil de forma secundária ---
+    # --- Momentum (média móvel do retorno) ---
     out["momentum_5d"] = daily_return.shift(1).rolling(window=5).mean()
     out["momentum_10d"] = daily_return.shift(1).rolling(window=10).mean()
 
@@ -66,8 +70,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hl_range = (df["High"] - df["Low"]) / df["Close"]
     out["hl_range_lag_1"] = hl_range.shift(1)
 
+    return out
+
+
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Recebe o DataFrame bruto (Open, High, Low, Close, Volume) e retorna
+    um DataFrame de features + coluna 'target_volatility', pronto para treino.
+    """
+    out = compute_feature_columns(df)
+
     # --- Alvo: retorno ABSOLUTO de amanhã (t+1), alinhado com as features de hoje (t) ---
-    out["target_volatility"] = abs_return.shift(-1)
+    daily_return = df["Close"].pct_change()
+    out["target_volatility"] = daily_return.abs().shift(-1)
 
     out = out.dropna()
 
